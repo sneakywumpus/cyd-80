@@ -13,7 +13,7 @@
 #include "esp_timer.h"
 
 static inline void sleep_for_us(long time) { usleep(time); }
-static inline void sleep_for_ms(int time) { usleep(time / 1000); }
+static inline void sleep_for_ms(int time) { usleep(time * 1000L); }
 
 static inline uint64_t get_clock_us(void)
 {

@@ -101,9 +101,9 @@ static BYTE p000_in(void)
 	register BYTE stat = 0b00000001; /* initially only output ready */
 	size_t size;
 
-	ESP_ERROR_CHECK(uart_get_buffered_data_len(CONFIG_ESP_CONSOLE_UART_NUM,
-						   &size));
-	if (size > 0)			/* check if there is input from UART */
+	/* check if there is input from UART */
+	if ((uart_get_buffered_data_len(CONFIG_ESP_CONSOLE_UART_NUM,
+					&size) == ESP_OK) && (size > 0))
 		stat &= 0b11111110;	/* if so flip status bit */
 
 	return stat;
@@ -117,9 +117,8 @@ static BYTE p001_in(void)
 {
 	size_t size;
 
-	ESP_ERROR_CHECK(uart_get_buffered_data_len(CONFIG_ESP_CONSOLE_UART_NUM,
-						   &size));
-	if (size > 0)
+	if ((uart_get_buffered_data_len(CONFIG_ESP_CONSOLE_UART_NUM,
+					&size) == ESP_OK) && (size > 0))
 		sio_last = getchar();
 
 	return sio_last;

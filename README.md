@@ -1,4 +1,4 @@
-# z80pack on ESP32-2432S028R a.k.a. CYD (Cheap Yellow Display)
+# z80pack on ESP32-2432S028R a.k.a. Cheap Yellow Display (CYD)
 
 To build z80pack for this device you need to have the SDK for ESP32-based
 devices installed and configured. The SDK manual has detailed instructions

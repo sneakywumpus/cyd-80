@@ -74,7 +74,7 @@ static int get_int(const char *prompt, const char *hint,
  */
 void config(void)
 {
-	const char *cfg = SD_MNTDIR "/CONF80/CFG.DAT";
+	const char *cfg = SD_MNTDIR "/CONF80/CYD80.DAT";
 	const char *cpath = SD_MNTDIR "/CODE80";
 	const char *cext = "*.BIN";
 	const char *dpath = SD_MNTDIR "/DISKS80";

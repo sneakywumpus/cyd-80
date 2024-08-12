@@ -64,7 +64,8 @@ void init_disks(void)
 		.allocation_unit_size = 16 * 1024
 	};
 
-	ret = spi_bus_initialize(host.slot, &bus_cfg, SDSPI_DEFAULT_DMA);
+	host.slot = VSPI_HOST;
+	ret = spi_bus_initialize(host.slot, &bus_cfg, SPI_DMA_CH_AUTO);
 	if (ret != ESP_OK) {
 		ESP_LOGE(TAG, "Failed to initialize bus.");
 		abort();

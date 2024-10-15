@@ -1,5 +1,9 @@
 # z80pack on ESP32-2432S028R a.k.a. Cheap Yellow Display (CYD)
 
+**This is currently a basic port to the CYD without any display output or touch input.
+Their is also a problem with phantom characters in the console input.
+Hopefully this will change in the future...**
+
 To build z80pack for this device you need to have the SDK for ESP32-based
 devices installed and configured. The SDK manual has detailed instructions
 how to install on all major PC platforms, it is available here:

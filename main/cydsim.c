@@ -22,9 +22,9 @@
 #include "esp_system.h"
 #include "esp_log.h"
 #include "esp_task_wdt.h"
-#include "esp_vfs_dev.h"
 #include "driver/gpio.h"
 #include "driver/uart.h"
+#include "driver/uart_vfs.h"
 
 /* Project includes */
 #include "sim.h"
@@ -88,12 +88,12 @@ void app_main(void)
 		abort();
 	}
 	/* tell VFS to use UART driver */
-	esp_vfs_dev_uart_use_driver(CONFIG_ESP_CONSOLE_UART_NUM);
+	uart_vfs_dev_use_driver(CONFIG_ESP_CONSOLE_UART_NUM);
 	/* setup CR/LF handling */
-	esp_vfs_dev_uart_port_set_rx_line_endings(CONFIG_ESP_CONSOLE_UART_NUM,
-						  ESP_LINE_ENDINGS_LF);
-	esp_vfs_dev_uart_port_set_tx_line_endings(CONFIG_ESP_CONSOLE_UART_NUM,
-						  ESP_LINE_ENDINGS_CRLF);
+	uart_vfs_dev_port_set_rx_line_endings(CONFIG_ESP_CONSOLE_UART_NUM,
+					      ESP_LINE_ENDINGS_LF);
+	uart_vfs_dev_port_set_tx_line_endings(CONFIG_ESP_CONSOLE_UART_NUM,
+					      ESP_LINE_ENDINGS_CRLF);
 
 	init_cpu();		/* initialize CPU */
 	init_disks();		/* initialize disk drives */

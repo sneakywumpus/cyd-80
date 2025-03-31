@@ -58,6 +58,28 @@ static void cydsim_ice_help(void);
 /* CPU speed */
 int speed = CPU_SPEED;
 
+static QueueHandle_t uart0_queue;
+
+/*
+ *	Handle UART BREAK event
+ */
+static void uart_event_task(void *pvParameters)
+{
+	uart_event_t event;
+
+	while (true) {
+		/* wait for UART event */
+		if (xQueueReceive(uart0_queue, (void *)&event,
+				  (TickType_t) portMAX_DELAY)) {
+			if (event.type == UART_BREAK) {
+				cpu_error = USERINT;
+				cpu_state = ST_STOPPED;
+			}
+		}
+	}
+	vTaskDelete(NULL);
+}
+
 void app_main(void)
 {
 	esp_err_t ret;
@@ -90,11 +112,13 @@ void app_main(void)
 	setvbuf(stdout, NULL, _IONBF, 0);
 	/* install UART driver for interrupt-driven reads and writes */
 	ret = uart_driver_install((uart_port_t) CONFIG_ESP_CONSOLE_UART_NUM,
-				  256, 0, 0, NULL, 0);
+				  256, 0, 10, &uart0_queue, 0);
 	if (ret != ESP_OK) {
 		ESP_LOGE(TAG, "Failed to install UART driver.");
 		abort();
 	}
+	/* create a task to handle UART BREAK event */
+	xTaskCreate(uart_event_task, "uart_event_task", 3072, NULL, 12, NULL);
 	/* tell VFS to use UART driver */
 	uart_vfs_dev_use_driver(CONFIG_ESP_CONSOLE_UART_NUM);
 	/* setup CR/LF handling */

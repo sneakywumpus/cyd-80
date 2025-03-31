@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
+#include <time.h>
 #include <unistd.h>
 #include <fcntl.h>
 
@@ -54,7 +55,7 @@ static int get_int(const char *prompt, const char *hint,
 	int i;
 	char s[6];
 
-	for (;;) {
+	while (true) {
 		printf("Enter %s%s: ", prompt, hint);
 		get_cmdline(s, 5);
 		if (s[0] == '\0')
@@ -73,14 +74,14 @@ static int get_int(const char *prompt, const char *hint,
  */
 void config(void)
 {
-	const char *cfg = SD_MNTDIR "/CONF80/CYD80.DAT";
+	const char *cfg = SD_MNTDIR "/CONF80/" CONF_FILE;
 	const char *cpath = SD_MNTDIR "/CODE80";
 	const char *cext = "*.BIN";
 	const char *dpath = SD_MNTDIR "/DISKS80";
 	const char *dext = "*.DSK";
 	char s[10];
 	unsigned int br;
-	int go_flag = 0;
+	bool go_flag = false;
 	int i, menu;
 
 	/* try to read config file */
@@ -100,8 +101,15 @@ void config(void)
 
 	while (!go_flag) {
 		if (menu) {
-			printf("c - switch CPU, currently %s\n",
-			       (cpu == Z80) ? "Z80" : "8080");
+			printf("c - switch CPU, currently ");
+#ifndef EXCLUDE_Z80
+			if (cpu == Z80)
+				puts("Z80");
+#endif
+#ifndef EXCLUDE_I8080
+			if (cpu == I8080)
+				puts("8080");
+#endif
 			printf("s - CPU speed: ");
 			if (speed == 0)
 				puts("unlimited");
@@ -124,10 +132,14 @@ void config(void)
 
 		switch (tolower((unsigned char) s[0])) {
 		case 'c':
+#if defined(EXCLUDE_I8080) || defined(EXCLUDE_Z80)
+			puts("Can't switch CPU");
+#else
 			if (cpu == Z80)
 				switch_cpu(I8080);
 			else
 				switch_cpu(Z80);
+#endif
 			break;
 
 		case 's':
@@ -165,8 +177,8 @@ again:
 
 		case 'r':
 			prompt_fn(s, "BIN");
-			if (s[0])
-				load_file(s);
+			if (s[0] && load_file(s))
+				PC = 0;
 			putchar('\n');
 			menu = 0;
 			break;
@@ -192,7 +204,7 @@ again:
 			break;
 
 		case 'g':
-			go_flag = 1;
+			go_flag = true;
 			break;
 
 		default:

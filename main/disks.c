@@ -30,6 +30,8 @@
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
 
+#include "gpio.h"
+
 #include "sd-fdc.h"
 #include "disks.h"
 #include "cydsim.h"
@@ -119,10 +121,12 @@ void list_files(const char *dir, const char *ext)
 
 /*
  * load a file 'name' into memory
+ * returns true on success, false on error
  */
-void load_file(const char *name)
+bool load_file(const char *name)
 {
 	int i = 0;
+	bool res;
 	register unsigned int j;
 	ssize_t br;
 	char SFN[30];
@@ -136,7 +140,7 @@ void load_file(const char *name)
 	sd_file = open(SFN, O_RDONLY);
 	if (sd_file < 0) {
 		puts("File not found");
-		return;
+		return false;
 	}
 
 	/* read file into memory */
@@ -147,12 +151,16 @@ void load_file(const char *name)
 			break;
 		i += SEC_SZ;
 	}
-	if (br < 0)
+	if (br < 0) {
 		printf("fread error: %s (%d)\n", strerror(errno), errno);
-	else
+		res = false;
+	} else {
 		printf("loaded file \"%s\" (%d bytes)\n", SFN, i + br);
+		res = true;
+	}
 
 	close(sd_file);
+	return res;
 }
 
 /*
@@ -214,7 +222,7 @@ void mount_disk(int drive, const char *name)
 /*
  * prepare I/O for sector read and write routines
  */
-static BYTE prep_io(int drive, int track, int sector, WORD addr)
+static BYTE prep_io(int drive, int track, int sector, WORD addr, bool rdwr)
 {
 	off_t pos;
 
@@ -233,8 +241,12 @@ static BYTE prep_io(int drive, int track, int sector, WORD addr)
 		return FDC_STAT_DMAADR;
 
 	/* check if disk in drive */
-	if (!disks[drive][0])
+	if (!strlen(disks[drive])) {
 		return FDC_STAT_NODISK;
+	}
+
+	/* turn on red/green LED */
+	gpio_set_level(rdwr ? LED_RED_PIN : LED_GREEN_PIN, 0);
 
 	/* open file with the disk image */
 	sd_file = open(disks[drive], O_RDWR);
@@ -259,11 +271,9 @@ BYTE read_sec(int drive, int track, int sector, WORD addr)
 	ssize_t br;
 	register int i;
 
-	/* turn on green LED */
-	gpio_set_level(LED_GREEN_PIN, 0);
-
 	/* prepare for sector read */
-	if ((stat = prep_io(drive, track, sector, addr)) == FDC_STAT_OK) {
+	stat = prep_io(drive, track, sector, addr, false);
+	if (stat == FDC_STAT_OK) {
 
 		/* read sector into memory */
 		br = read(sd_file, &dsk_buf[0], SEC_SZ);
@@ -300,7 +310,8 @@ BYTE write_sec(int drive, int track, int sector, WORD addr)
 	gpio_set_level(LED_RED_PIN, 0);
 
 	/* prepare for sector write */
-	if ((stat = prep_io(drive, track, sector, addr)) == FDC_STAT_OK) {
+	stat = prep_io(drive, track, sector, addr, true);
+	if (stat == FDC_STAT_OK) {
 
 		/* write sector to disk image */
 		for (i = 0; i < SEC_SZ; i++)

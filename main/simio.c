@@ -1,7 +1,7 @@
 /*
  * Z80SIM  -  a Z80-CPU simulator
  *
- * Copyright (C) 2024 by Udo Munk & Thomas Eberhardt
+ * Copyright (C) 2024-2025 by Udo Munk & Thomas Eberhardt
  *
  * I/O simulation for cydsim
  *
@@ -33,19 +33,21 @@
 #include "simcore.h"
 #include "simio.h"
 
-#include "cydsim.h"
+#include "gpio.h"
+
 #include "rtc80.h"
 #include "sd-fdc.h"
+
+static const char *TAG = "IO";
 
 /*
  *	Forward declarations of the I/O functions
  *	for all port addresses.
  */
-static void p000_out(BYTE data), p001_out(BYTE data), p255_out(BYTE data);
-static void hwctl_out(BYTE data);
-static BYTE p000_in(void), p001_in(void), p255_in(void), hwctl_in(void);
-static void mmu_out(BYTE data);
-static BYTE mmu_in(void);
+static BYTE sios_in(void), siod_in(void), mmu_in(void), hwctl_in(void);
+static BYTE fpsw_in(void);
+static void led_out(BYTE data), siod_out(BYTE data), mmu_out(BYTE data);
+static void hwctl_out(BYTE data), fpsw_out(BYTE data), fpled_out(BYTE data);
 
 static BYTE sio_last;	/* last character received */
        BYTE fp_value;	/* port 255 value, can be set from ICE or config() */
@@ -55,30 +57,32 @@ static BYTE hwctl_lock = 0xff; /* lock status hardware control port */
  *	This array contains function pointers for every input
  *	I/O port (0 - 255), to do the required I/O.
  */
-BYTE (*const port_in[256])(void) = {
-	[  0] = p000_in,	/* SIO status */
-	[  1] = p001_in,	/* SIO data */
+in_func_t *const port_in[256] = {
+	[  0] = sios_in,	/* SIO status */
+	[  1] = siod_in,	/* SIO data */
 	[  4] = fdc_in,		/* FDC status */
 	[ 64] = mmu_in,		/* MMU */
 	[ 65] = clkc_in,	/* RTC read clock command */
 	[ 66] = clkd_in,	/* RTC read clock data */
 	[160] = hwctl_in,	/* virtual hardware control */
-	[255] = p255_in		/* read from front panel switches */
+	[254] = fpsw_in,	/* mirror of port 255 */
+	[255] = fpsw_in		/* read from front panel switches */
 };
 
 /*
  *	This array contains function pointers for every output
  *	I/O port (0 - 255), to do the required I/O.
  */
-void (*const port_out[256])(BYTE data) = {
-	[  0] = p000_out,	/* internal LED */
-	[  1] = p001_out,	/* SIO data */
+out_func_t *const port_out[256] = {
+	[  0] = led_out,	/* blue LED */
+	[  1] = siod_out,	/* SIO data */
 	[  4] = fdc_out,	/* FDC command */
 	[ 64] = mmu_out,	/* MMU */
 	[ 65] = clkc_out,	/* RTC write clock command */
 	[ 66] = clkd_out,	/* RTC write clock data */
 	[160] = hwctl_out,	/* virtual hardware control */
-	[255] = p255_out	/* write to front panel switches */
+	[254] = fpsw_out,	/* write to front panel switches */
+	[255] = fpled_out	/* write to front panel lights (dummy) */
 };
 
 /*
@@ -91,12 +95,19 @@ void init_io(void)
 }
 
 /*
- *	I/O function port 0 read:
- *	read status of the console and return:
+ *	This function is to stop the I/O devices. It is
+ *	called from the CPU simulation on exit.
+ */
+void exit_io(void)
+{
+}
+
+/*
+ *	I/O handler for read SIO status:
  *	bit 0 = 0, character available for input from tty
  *	bit 7 = 0, transmitter ready to write character to tty
  */
-static BYTE p000_in(void)
+static BYTE sios_in(void)
 {
 	register BYTE stat = 0b00000001; /* initially only output ready */
 	size_t size;
@@ -110,10 +121,9 @@ static BYTE p000_in(void)
 }
 
 /*
- *	I/O function port 1 read:
- *	Read byte from console.
+ *	I/O handler for read SIO data.
  */
-static BYTE p001_in(void)
+static BYTE siod_in(void)
 {
 	size_t size;
 
@@ -125,6 +135,16 @@ static BYTE p001_in(void)
 }
 
 /*
+ *	read MMU register
+ *	returns maximum bank in upper nibble
+ *	and currently selected bank in lower nibble
+ */
+static BYTE mmu_in(void)
+{
+	return (NUMSEG << 4) | selbnk;
+}
+
+/*
  *	Input from virtual hardware control port
  *	returns lock status of the port
  */
@@ -133,28 +153,19 @@ static BYTE hwctl_in(void)
 	return hwctl_lock;
 }
 
-/*
- *	read MMU register
- */
-static BYTE mmu_in(void)
-{
-	return selbnk;
-}
 
 /*
- *	I/O function port 255 read:
- *	return virtual front panel switches state
+ *	Read virtual front panel switches state
  */
-static BYTE p255_in(void)
+static BYTE fpsw_in(void)
 {
 	return fp_value;
 }
 
 /*
- * 	I/O function port 0 write:
- *	Switch builtin blue LED on/off.
+ *	Switch blue LED on/off.
  */
-static void p000_out(BYTE data)
+static void led_out(BYTE data)
 {
 	if (!data) {
 		/* 0 switches LED off */
@@ -166,12 +177,28 @@ static void p000_out(BYTE data)
 }
 
 /*
- *	I/O function port 1 write:
- *	Write byte to UART.
+ *	Write byte to console.
  */
-static void p001_out(BYTE data)
+static void siod_out(BYTE data)
 {
 	putchar((int) data & 0x7f); /* strip parity, some software won't */
+}
+
+/*
+ *	write MMU register
+ */
+static void mmu_out(BYTE data)
+{
+	if (selbnk > NUMSEG) {
+		ESP_LOGE(TAG, "%04x: trying to select non-existing bank %d",
+			 PC, data);
+		cpu_error = IOERROR;
+		cpu_state = ST_STOPPED;
+		return;
+	}
+	selbnk = data;
+	if (selbnk != 0)
+		curbnk = bnks[selbnk - 1];
 }
 
 /*
@@ -215,12 +242,12 @@ static void hwctl_out(BYTE data)
 	}
 
 #if !defined (EXCLUDE_I8080) && !defined(EXCLUDE_Z80)
-	if (data & 32) {	/* switch cpu model to Z80 */
+	if (data & 32) {		/* switch cpu model to Z80 */
 		switch_cpu(Z80);
 		return;
 	}
 
-	if (data & 16) {	/* switch cpu model to 8080 */
+	if (data & 16) {		/* switch cpu model to 8080 */
 		switch_cpu(I8080);
 		return;
 	}
@@ -228,17 +255,17 @@ static void hwctl_out(BYTE data)
 }
 
 /*
- *	write MMU register
+ *	This allows to set the virtual front panel switches with ICE p command
  */
-static void mmu_out(BYTE data)
+static void fpsw_out(BYTE data)
 {
-	selbnk = data;
+	fp_value = data;
 }
 
 /*
- *	This allows to set the virtual front panel switches with ICE p command
+ *	Write output to front panel lights (dummy)
  */
-static void p255_out(BYTE data)
+static void fpled_out(BYTE data)
 {
-	fp_value = data;
+	UNUSED(data);
 }

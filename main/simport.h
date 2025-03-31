@@ -20,6 +20,6 @@ static inline uint64_t get_clock_us(void)
 	return esp_timer_get_time();
 }
 
-extern int get_cmdline(char *buf, int len);
+extern bool get_cmdline(char *buf, int len);
 
 #endif /* !SIMPORT_INC */

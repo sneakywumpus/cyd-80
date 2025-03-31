@@ -1,7 +1,7 @@
 /*
  * Z80SIM  -  a Z80-CPU simulator
  *
- * Copyright (C) 2024 by Udo Munk & Thomas Eberhardt
+ * Copyright (C) 2024-2025 by Udo Munk & Thomas Eberhardt
  *
  * This is the main program for a ESP32-2432S028R board,
  * substitutes z80core/simmain.c
@@ -18,6 +18,7 @@
 /* Raspberry SDK and FatFS includes */
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
 
 #include "esp_system.h"
 #include "esp_log.h"
@@ -25,6 +26,8 @@
 #include "driver/gpio.h"
 #include "driver/uart.h"
 #include "driver/uart_vfs.h"
+
+#include "gpio.h"
 
 /* Project includes */
 #include "sim.h"
@@ -44,8 +47,13 @@
 
 static const char *TAG = "main";
 
-#define BS  0x08 /* backspace */
-#define DEL 0x7f /* delete */
+#ifdef WANT_ICE
+static void cydsim_ice_cmd(char *cmd, WORD *wrk_addr);
+static void cydsim_ice_help(void);
+#endif
+
+#define BS  0x08 /* ASCII backspace */
+#define DEL 0x7f /* ASCII delete */
 
 /* CPU speed */
 int speed = CPU_SPEED;
@@ -95,25 +103,28 @@ void app_main(void)
 	uart_vfs_dev_port_set_tx_line_endings(CONFIG_ESP_CONSOLE_UART_NUM,
 					      ESP_LINE_ENDINGS_CRLF);
 
-	init_cpu();		/* initialize CPU */
-	init_disks();		/* initialize disk drives */
-	init_memory();		/* initialize memory configuration */
-	init_io();		/* initialize I/O devices */
-
 	/* print banner */
 	printf("\fZ80pack release %s, %s\n", RELEASE, COPYR);
 	printf("%s release %s\n", USR_COM, USR_REL);
 	printf("%s\n\n", USR_CPR);
 
+	init_cpu();		/* initialize CPU */
+	PC = 0xff00;		/* power on jump into the boot ROM */
+	init_disks();		/* initialize disk drives */
+	init_memory();		/* initialize memory configuration */
+	init_io();		/* initialize I/O devices */
 	config();		/* configure the machine */
 
-	f_flag = speed;		/* setup speed of the CPU */
-	tmax = speed * 10000;	/* theoretically */
-
-	PC = 0xff00;		/* power on jump into the boot ROM */
+	f_value = speed;	/* setup speed of the CPU */
+	if (f_value)
+		tmax = speed * 10000;	/* theoretically */
+	else
+		tmax = 100000;	/* for periodic CPU accounting updates */
 
 	/* run the CPU with whatever is in memory */
 #ifdef WANT_ICE
+	ice_cust_cmd = cydsim_ice_cmd;
+	ice_cust_help = cydsim_ice_help;
 	ice_cmd_loop(0);
 #else
 	run_cpu();
@@ -138,11 +149,12 @@ void app_main(void)
  * from the terminal. For single character requests (len == 2),
  * returns immediately after input is received.
  */
-int get_cmdline(char *buf, int len)
+bool get_cmdline(char *buf, int len)
 {
-	int c, i = 0;
+	int i = 0;
+	char c;
 
-	for (;;) {
+	while (true) {
 		c = getchar();
 		if ((c == BS) || (c == DEL)) {
 			if (i >= 1) {
@@ -164,5 +176,46 @@ int get_cmdline(char *buf, int len)
 	}
 	buf[i] = '\0';
 	putchar('\n');
-	return 0;
+	return true;
 }
+
+#ifdef WANT_ICE
+
+static void cydsim_ice_cmd(char *cmd, WORD *wrk_addr)
+{
+	char *s;
+
+	switch (tolower((unsigned char) *cmd)) {
+	case 'r':
+		cmd++;
+		while (isspace((unsigned char) *cmd))
+			cmd++;
+		for (s = cmd; *s; s++)
+			*s = toupper((unsigned char) *s);
+		if (load_file(cmd))
+			*wrk_addr = PC = 0;
+		break;
+
+	case '!':
+		cmd++;
+		while (isspace((unsigned char) *cmd))
+			cmd++;
+		if (strcasecmp(cmd, "ls") == 0)
+			list_files("/CODE80", "*.BIN");
+		else
+			puts("what??");
+		break;
+
+	default:
+		puts("what??");
+		break;
+	}
+}
+
+static void cydsim_ice_help(void)
+{
+	puts("r filename                read file (without .BIN) into memory");
+	puts("! ls                      list files");
+}
+
+#endif

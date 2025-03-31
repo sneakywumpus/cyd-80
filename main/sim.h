@@ -1,7 +1,7 @@
 /*
  * Z80SIM  -  a Z80-CPU simulator
  *
- * Copyright (C) 2024 by Udo Munk & Thomas Eberhardt
+ * Copyright (C) 2024-2025 by Udo Munk & Thomas Eberhardt
  *
  * This is the configuration for an ESP32-2432S028R board
  */
@@ -18,18 +18,20 @@
 #ifndef EXCLUDE_Z80
 /*#define FAST_BLOCK*/	/* much faster but not accurate Z80 block instr. */
 #endif
-#define BAREMETAL	/* set up the simulator core for bare metal use */
 
 #define WANT_ICE	/* attach ICE to headless machine */
 #ifdef WANT_ICE
+#define BAREMETAL	/* disable ICE commands that require a full OS */
 #define WANT_TIM	/* count t-states */
 #define HISIZE	100	/* number of entries in history */
 #define SBSIZE	4	/* number of software breakpoints */
 #define WANT_HB		/* hardware breakpoint */
 #endif
 
+#define CONF_FILE	"CYD80.DAT"
+
 #define USR_COM "ESP32-2432S028R Z80/8080 emulator"
 #define USR_REL "0.0"
-#define USR_CPR "Copyright (C) 2024 by Udo Munk & Thomas Eberhardt"
+#define USR_CPR "Copyright (C) 2024-2025 by Udo Munk & Thomas Eberhardt"
 
 #endif

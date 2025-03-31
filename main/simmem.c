@@ -2,6 +2,7 @@
  * Z80SIM  -  a Z80-CPU simulator
  *
  * Copyright (C) 2024 by Udo Munk
+ * Copyright (C) 2025 by Thomas Eberhardt
  *
  * This module implements the memory for the Z80/8080 CPU.
  *
@@ -19,11 +20,11 @@
 #include "simmem.h"
 
 /* 64KB bank 0 + common segment */
-BYTE bnk0[65536];
-/* 48KB bank 1 */
-BYTE bnk1[49152];
+BYTE __aligned(4) bnk0[65536];
+/* NUMSEG memory banks of size SEGSIZ */
+BYTE __aligned(4) bnks[NUMSEG][SEGSIZ];
 /* selected bank */
-BYTE selbnk;
+BYTE selbnk, *curbnk;
 
 /* boot ROM code */
 #define MEMSIZE 256
@@ -31,7 +32,7 @@ BYTE selbnk;
 
 void init_memory(void)
 {
-	register int i;
+	register int i, j;
 
 	/* copy boot ROM into write protected top memory page */
 	for (i = 0; i < MEMSIZE; i++)
@@ -40,8 +41,13 @@ void init_memory(void)
 	/* trash memory like in a real machine after power on */
 	for (i = 0; i < 0xff00; i++)
 		bnk0[i] = rand() % 256;
-	for (i = 0; i < 0xc000; i++)
-		bnk1[i] = rand() % 256;
+	for (j = 0; j < NUMSEG; j++) {
+		curbnk = bnks[j];
+		for (i = 0; i < SEGSIZ; i++)
+			curbnk[i] = rand() % 256;
+	}
+
+	selbnk = 0;
 }
 
 void reset_memory(void)

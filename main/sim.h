@@ -19,7 +19,7 @@
 /*#define FAST_BLOCK*/	/* much faster but not accurate Z80 block instr. */
 #endif
 
-#define WANT_ICE	/* attach ICE to headless machine */
+/*#define WANT_ICE*/	/* attach ICE to headless machine */
 #ifdef WANT_ICE
 #define BAREMETAL	/* disable ICE commands that require a full OS */
 #define WANT_TIM	/* count t-states */

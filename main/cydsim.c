@@ -15,7 +15,7 @@
  * 09-JUN-2024 implemented boot ROM
  */
 
-/* Raspberry SDK and FatFS includes */
+/* ESP-IDF includes */
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
@@ -40,6 +40,10 @@
 #include "simio.h"
 #ifdef WANT_ICE
 #include "simice.h"
+#endif
+
+#ifdef WANT_ICE
+#include "driver/gptimer.h"
 #endif
 
 #include "disks.h"
@@ -118,7 +122,7 @@ void app_main(void)
 		abort();
 	}
 	/* create a task to handle UART BREAK event */
-	xTaskCreate(uart_event_task, "uart_event_task", 3072, NULL, 12, NULL);
+	xTaskCreate(uart_event_task, "uart_event_task", 1024, NULL, 12, NULL);
 	/* tell VFS to use UART driver */
 	uart_vfs_dev_use_driver(CONFIG_ESP_CONSOLE_UART_NUM);
 	/* setup CR/LF handling */
@@ -127,6 +131,8 @@ void app_main(void)
 	uart_vfs_dev_port_set_tx_line_endings(CONFIG_ESP_CONSOLE_UART_NUM,
 					      ESP_LINE_ENDINGS_CRLF);
 
+	init_disks();		/* initialize disk drives */
+
 	/* print banner */
 	printf("\fZ80pack release %s, %s\n", RELEASE, COPYR);
 	printf("%s release %s\n", USR_COM, USR_REL);
@@ -134,7 +140,6 @@ void app_main(void)
 
 	init_cpu();		/* initialize CPU */
 	PC = 0xff00;		/* power on jump into the boot ROM */
-	init_disks();		/* initialize disk drives */
 	init_memory();		/* initialize memory configuration */
 	init_io();		/* initialize I/O devices */
 	config();		/* configure the machine */
@@ -205,11 +210,109 @@ bool get_cmdline(char *buf, int len)
 
 #ifdef WANT_ICE
 
+/*
+ *	This function is the callback for the alarm.
+ *	The CPU emulation is stopped here.
+ */
+static bool timeout(gptimer_handle_t timer,
+		    const gptimer_alarm_event_data_t *edata, void *user_data)
+{
+	UNUSED(timer);
+	UNUSED(edata);
+	UNUSED(user_data);
+
+	cpu_state = ST_STOPPED;
+	return false;
+}
+
 static void cydsim_ice_cmd(char *cmd, WORD *wrk_addr)
 {
 	char *s;
+	const char *t;
+	BYTE save[3];
+	WORD save_PC;
+	Tstates_t T0;
+	unsigned freq;
+#ifdef WANT_HB
+	bool save_hb_flag;
+#endif
+	gptimer_handle_t gptimer = NULL;
+	gptimer_config_t timer_config = {
+		.clk_src = GPTIMER_CLK_SRC_DEFAULT,
+		.direction = GPTIMER_COUNT_UP,
+		.resolution_hz = 1000000 /* 1 MHz */
+	};
+	gptimer_event_callbacks_t cbs = {
+		.on_alarm = timeout
+	};
+	gptimer_alarm_config_t alarm_config = {
+		.alarm_count = 3000000 /* period = 3 s */
+	};
 
 	switch (tolower((unsigned char) *cmd)) {
+	case 'c':
+		/*
+		 *	Calculate the clock frequency of the emulated CPU:
+		 *	into memory locations 0000H to 0002H the following
+		 *	code will be stored:
+		 *		LOOP: JP LOOP
+		 *	It uses 10 T states for each execution. A 3 second
+		 *	alarm is set and then the CPU started. For every JP
+		 *	the T states counter is incremented by 10 and after
+		 *	the timer is down and stops the emulation, the clock
+		 *	speed of the CPU in MHz is calculated with:
+		 *		f = (T - T0) / 3000000
+		 */
+
+#ifdef WANT_HB
+		save_hb_flag = hb_flag;
+		hb_flag = false;
+#endif
+		save[0] = getmem(0x0000); /* save memory locations */
+		save[1] = getmem(0x0001); /* 0000H - 0002H */
+		save[2] = getmem(0x0002);
+		putmem(0x0000, 0xc3);	/* store opcode JP 0000H at address */
+		putmem(0x0001, 0x00);	/* 0000H */
+		putmem(0x0002, 0x00);
+		save_PC = PC;		/* save PC */
+		PC = 0;			/* set PC to this code */
+		T0 = T;			/* remember start clock counter */
+					/* setup 3 second alarm timer */
+		ESP_ERROR_CHECK(gptimer_new_timer(&timer_config, &gptimer));
+		ESP_ERROR_CHECK(gptimer_register_event_callbacks(gptimer, &cbs, NULL));
+		ESP_ERROR_CHECK(gptimer_enable(gptimer));
+		ESP_ERROR_CHECK(gptimer_set_alarm_action(gptimer, &alarm_config));
+		ESP_ERROR_CHECK(gptimer_start(gptimer));
+		run_cpu();		/* start CPU */
+					/* cleanup alarm timer */
+		ESP_ERROR_CHECK(gptimer_stop(gptimer));
+		ESP_ERROR_CHECK(gptimer_disable(gptimer));
+		ESP_ERROR_CHECK(gptimer_del_timer(gptimer));
+		PC = save_PC;		/* restore PC */
+		putmem(0x0000, save[0]); /* restore memory locations */
+		putmem(0x0001, save[1]); /* 0000H - 0002H */
+		putmem(0x0002, save[2]);
+#ifdef WANT_HB
+		hb_flag = save_hb_flag;
+#endif
+#ifndef EXCLUDE_Z80
+		if (cpu == Z80)
+			t = "JP";
+#endif
+#ifndef EXCLUDE_I8080
+		if (cpu == I8080)
+			t = "JMP";
+#endif
+		if (cpu_error == NONE) {
+			freq = (unsigned) ((T - T0) / 30000);
+			printf("CPU executed %" PRIu64 " %s instructions "
+			       "in 3 seconds\n", (T - T0) / 10, t);
+			printf("clock frequency = %u.%02u MHz\n",
+			       freq / 100, freq % 100);
+		} else
+			puts("Interrupted by user");
+		break;
+
 	case 'r':
 		cmd++;
 		while (isspace((unsigned char) *cmd))
@@ -225,7 +328,7 @@ static void cydsim_ice_cmd(char *cmd, WORD *wrk_addr)
 		while (isspace((unsigned char) *cmd))
 			cmd++;
 		if (strcasecmp(cmd, "ls") == 0)
-			list_files("/CODE80", "*.BIN");
+			list_files(SD_MNTDIR "/CODE80", "*.BIN");
 		else
 			puts("what??");
 		break;
@@ -238,6 +341,7 @@ static void cydsim_ice_cmd(char *cmd, WORD *wrk_addr)
 
 static void cydsim_ice_help(void)
 {
+	puts("c                         measure clock frequency");
 	puts("r filename                read file (without .BIN) into memory");
 	puts("! ls                      list files");
 }

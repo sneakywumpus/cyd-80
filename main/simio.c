@@ -16,7 +16,7 @@
  * 29-JUN-2024 implemented banked memory
  */
 
-/* Raspberry SDK includes */
+/* ESP-IDF includes */
 #include <stdio.h>
 #include <errno.h>
 #include <unistd.h>
